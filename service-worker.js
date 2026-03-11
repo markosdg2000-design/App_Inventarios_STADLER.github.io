@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inventario-qr-v1';
+const CACHE_NAME = 'inventario-qr-v2';
 const ASSETS = [
   './',
   './index.html',
