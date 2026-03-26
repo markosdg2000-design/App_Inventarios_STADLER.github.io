@@ -25,6 +25,7 @@ const totalRegistros = $('totalRegistros');
 const statusEl = $('status');
 const scanState = $('scanState');
 const retryCameraBtn = $('retryCameraBtn');
+const readerEl = $('reader');
 
 const QR_LIB_URLS = [
   './js/vendor/html5-qrcode.min.js',
@@ -36,20 +37,35 @@ function fmtDate(d) {
   return new Intl.DateTimeFormat('es-ES', { dateStyle: 'short', timeStyle: 'medium' }).format(d);
 }
 
+function mostrarBotonReintento(mostrar) {
+  if (!retryCameraBtn) return;
+  retryCameraBtn.style.display = mostrar ? 'inline-flex' : 'none';
+}
+
 function actualizarTabla() {
+  if (!tbody || !totalRegistros) return;
   tbody.innerHTML = '';
   registros.forEach((r, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${i + 1}</td>
-      <td>${r.codigo}</td>
-      <td>${r.cantidad}</td>
-      <td>${r.serie}</td>
-      <td>${r.fecha}</td>
+      <td>${escapeHtml(r.codigo)}</td>
+      <td>${escapeHtml(r.cantidad)}</td>
+      <td>${escapeHtml(r.serie)}</td>
+      <td>${escapeHtml(r.fecha)}</td>
     `;
     tbody.appendChild(tr);
   });
-  totalRegistros.textContent = registros.length;
+  totalRegistros.textContent = String(registros.length);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 async function pausarScanner() {
@@ -62,7 +78,7 @@ async function pausarScanner() {
   }
 
   scannerPausado = true;
-  scanState.textContent = 'Escáner en pausa';
+  if (scanState) scanState.textContent = 'Escáner en pausa';
 }
 
 async function reanudarScanner() {
@@ -75,8 +91,8 @@ async function reanudarScanner() {
   }
 
   scannerPausado = false;
-  scanState.textContent = 'Escáner activo';
-  statusEl.textContent = 'Escáner activo. Esperando siguiente QR…';
+  if (scanState) scanState.textContent = 'Escáner activo';
+  if (statusEl) statusEl.textContent = 'Escáner activo. Esperando siguiente QR…';
 }
 
 async function abrirModal(codigo = '', manual = false) {
@@ -98,11 +114,8 @@ async function abrirModal(codigo = '', manual = false) {
   $('modalWrap').style.display = 'flex';
   $('modalWrap').setAttribute('aria-hidden', 'false');
 
-  if (manual) {
-    $('codigoInput').focus();
-  } else {
-    $('cantidadInput').focus();
-  }
+  if (manual) $('codigoInput').focus();
+  else $('cantidadInput').focus();
 }
 
 async function cerrarModal() {
@@ -112,47 +125,6 @@ async function cerrarModal() {
   $('modalWrap').style.display = 'none';
   $('modalWrap').setAttribute('aria-hidden', 'true');
   await reanudarScanner();
-}
-
-$('cancelBtn').addEventListener('click', cerrarModal);
-$('manualBtn').addEventListener('click', () => abrirModal('', true));
-
-$('guardarBtn').addEventListener('click', async () => {
-  const codigo = (modoManual ? $('codigoInput').value : codigoPendiente || $('codigoInput').value).trim();
-  const cantidad = Number($('cantidadInput').value);
-  const serie = $('serieInput').value.trim();
-
-  if (!codigo) {
-    alert('Introduce un código de componente válido.');
-    return;
-  }
-  if (!cantidad || cantidad <= 0) {
-    alert('Introduce una cantidad válida mayor que 0.');
-    return;
-  }
-  if (!serie) {
-    alert('Introduce el número de serie destino.');
-    return;
-  }
-
-  registros.push({
-    codigo,
-    cantidad,
-    serie,
-    fecha: fmtDate(new Date())
-  });
-
-  actualizarTabla();
-  await cerrarModal();
-});
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
 
 function generarTablaHTMLSimple() {
@@ -222,36 +194,24 @@ async function copiarTablaInventario() {
   return copiado;
 }
 
-$('copyBtn').addEventListener('click', copiarTablaInventario);
-
-$('mailBtn').addEventListener('click', async () => {
-  const copiado = await copiarTablaInventario();
-  if (!registros.length) return;
-
-  const asunto = encodeURIComponent(`Inventario QR (${registros.length} registros)`);
-  const cuerpo = copiado
-    ? encodeURIComponent('La tabla de inventario ya está copiada en tu portapapeles.\nPégala en el cuerpo del correo (Paste/Pegar).')
-    : encodeURIComponent('No se pudo copiar formato enriquecido automáticamente.\nPuedes copiar manualmente la tabla visible en la app.');
-
-  window.location.href = `mailto:?subject=${asunto}&body=${cuerpo}`;
-});
-
 async function onScanSuccess(decodedText) {
+  const texto = String(decodedText || '').trim();
+  if (!texto) return;
+
   const ahora = Date.now();
-  const duplicadoReciente = decodedText === ultimoCodigo && (ahora - ultimoMomento) < 2500;
+  const duplicadoReciente = texto === ultimoCodigo && (ahora - ultimoMomento) < 2500;
   if (modalAbierta || duplicadoReciente) return;
 
-  ultimoCodigo = decodedText;
+  ultimoCodigo = texto;
   ultimoMomento = ahora;
-  statusEl.textContent = `QR detectado: ${decodedText}`;
-  await abrirModal(decodedText, false);
+  if (statusEl) statusEl.textContent = `QR detectado: ${texto}`;
+  await abrirModal(texto, false);
 }
 
 function obtenerTrackActivoDelReader() {
   const video = document.querySelector('#reader video');
   const stream = video?.srcObject;
-  const track = stream?.getVideoTracks?.()[0];
-  return track || null;
+  return stream?.getVideoTracks?.()[0] || null;
 }
 
 async function aplicarAutoenfoque(track) {
@@ -267,7 +227,6 @@ async function aplicarAutoenfoque(track) {
   }
 
   if (!advanced.length) return false;
-
   await track.applyConstraints({ advanced });
   return true;
 }
@@ -278,15 +237,13 @@ async function intentarConfigurarAutoenfoque() {
     if (track) {
       try {
         const ok = await aplicarAutoenfoque(track);
-        if (ok) {
+        if (ok && statusEl) {
           statusEl.textContent = 'Autoenfoque activado. Escanea con la cámara trasera.';
         }
-        return;
-      } catch (_) {
-        return;
-      }
+      } catch (_) {}
+      return;
     }
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
@@ -296,7 +253,7 @@ function esDispositivoIOS() {
 }
 
 function elegirCamaraTrasera(camaras) {
-  const porEtiqueta = camaras.find(c => /(back|rear|environment|trasera)/i.test(c.label || ''));
+  const porEtiqueta = camaras.find((c) => /(back|rear|environment|trasera)/i.test(c.label || ''));
   return porEtiqueta || camaras[0];
 }
 
@@ -321,11 +278,31 @@ async function iniciarConFallback(html5QrCode, camaras, config) {
   throw ultimoError || new Error('No se pudo iniciar el lector QR.');
 }
 
+async function detenerScannerHtml5() {
+  if (!html5QrCodeInstance) return;
+  try {
+    if (html5QrCodeInstance.isScanning) {
+      await html5QrCodeInstance.stop();
+    }
+  } catch (_) {}
+  try {
+    await html5QrCodeInstance.clear();
+  } catch (_) {}
+  html5QrCodeInstance = null;
+}
+
 function detenerScannerNativo() {
   scanNativoActivo = false;
   detectorNativo = null;
   ctxNativo = null;
   canvasNativo = null;
+
+  if (videoNativo) {
+    try {
+      videoNativo.pause();
+      videoNativo.srcObject = null;
+    } catch (_) {}
+  }
   videoNativo = null;
 
   if (streamNativo) {
@@ -345,7 +322,7 @@ function detectarConJsQR() {
 
   ctxNativo.drawImage(videoNativo, 0, 0, canvasNativo.width, canvasNativo.height);
   const imageData = ctxNativo.getImageData(0, 0, canvasNativo.width, canvasNativo.height);
-  const codigo = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+  const codigo = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
   return codigo?.data || null;
 }
 
@@ -357,13 +334,32 @@ async function escanearConDetectorNativo() {
     if (detectorNativo) {
       const codigos = await detectorNativo.detect(videoNativo);
       texto = codigos?.[0]?.rawValue || null;
-function mostrarBotonReintento(mostrar) {
-  if (!retryCameraBtn) return;
-  retryCameraBtn.style.display = mostrar ? 'inline-flex' : 'none';
+    } else {
+      texto = detectarConJsQR();
+    }
+
+    if (texto) {
+      await onScanSuccess(texto);
+    }
+  } catch (_) {
+    // ignorar frames no legibles
+  }
+
+  if (scanNativoActivo) {
+    requestAnimationFrame(escanearConDetectorNativo);
+  }
 }
 
 function cargarScript(src) {
   return new Promise((resolve, reject) => {
+    const yaExiste = document.querySelector(`script[src="${src}"]`);
+    if (yaExiste) {
+      yaExiste.addEventListener('load', () => resolve(true), { once: true });
+      yaExiste.addEventListener('error', () => reject(new Error(`No se pudo cargar ${src}`)), { once: true });
+      if (window.Html5Qrcode) resolve(true);
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = src;
     script.async = true;
@@ -398,51 +394,12 @@ function validarEntornoCamara() {
   }
 }
 
-async function iniciarScanner() {
-  try {
-    mostrarBotonReintento(false);
-    validarEntornoCamara();
-    await asegurarLibreriaQr();
-
-    if (html5QrCodeInstance?.isScanning) {
-      await html5QrCodeInstance.stop();
-    }
-
-    html5QrCodeInstance = new Html5Qrcode('reader');
-    const cams = await Html5Qrcode.getCameras();
-    if (!cams?.length) throw new Error('No se detectaron cámaras.');
-
-    const esIOS = esDispositivoIOS();
-    const configEscaneo = {
-      fps: esIOS ? 7 : 10,
-      aspectRatio: 1.333,
-      experimentalFeatures: { useBarCodeDetectorIfSupported: !esIOS }
-    };
-
-    if (!esIOS) {
-      configEscaneo.qrbox = { width: 240, height: 240 };
-    } else {
-      texto = detectarConJsQR();
-    }
-
-    if (texto) {
-      await onScanSuccess(texto);
-    }
-  } catch (_) {
-    // Ignoramos frames no legibles.
-  }
-
-  if (scanNativoActivo) {
-    requestAnimationFrame(escanearConDetectorNativo);
-  }
-}
-
 async function iniciarScannerNativo() {
-  const reader = document.getElementById('reader');
-  if (!reader) throw new Error('No existe contenedor para la cámara.');
+  if (!readerEl) throw new Error('No existe contenedor para la cámara.');
 
+  await detenerScannerHtml5();
   detenerScannerNativo();
-  reader.innerHTML = '';
+  readerEl.innerHTML = '';
 
   streamNativo = await navigator.mediaDevices.getUserMedia({
     video: {
@@ -455,12 +412,13 @@ async function iniciarScannerNativo() {
 
   videoNativo = document.createElement('video');
   videoNativo.setAttribute('playsinline', 'true');
-  videoNativo.autoplay = true;
+  videoNativo.setAttribute('autoplay', 'true');
   videoNativo.muted = true;
   videoNativo.srcObject = streamNativo;
   videoNativo.style.width = '100%';
   videoNativo.style.borderRadius = '14px';
-  reader.appendChild(videoNativo);
+  readerEl.appendChild(videoNativo);
+
   canvasNativo = document.createElement('canvas');
   ctxNativo = canvasNativo.getContext('2d', { willReadFrequently: true });
 
@@ -468,59 +426,16 @@ async function iniciarScannerNativo() {
 
   if (typeof window.BarcodeDetector === 'function') {
     detectorNativo = new BarcodeDetector({ formats: ['qr_code'] });
-    scanNativoActivo = true;
-    requestAnimationFrame(escanearConDetectorNativo);
-    statusEl.textContent = 'Escáner activo (modo nativo). Esperando primer QR…';
+    if (statusEl) statusEl.textContent = 'Escáner activo (modo nativo). Esperando primer QR…';
   } else if (typeof window.jsQR === 'function') {
     detectorNativo = null;
-    scanNativoActivo = true;
-    requestAnimationFrame(escanearConDetectorNativo);
-    statusEl.textContent = 'Escáner activo (modo jsQR local). Esperando primer QR…';
+    if (statusEl) statusEl.textContent = 'Escáner activo (modo jsQR local). Esperando primer QR…';
   } else {
-    detectorNativo = null;
-    statusEl.textContent = 'Cámara abierta, pero sin motor de escaneo. Copia jsQR.js en /js o usa introducir código manualmente.';
-  }
-}
-
-function mostrarBotonReintento(mostrar) {
-  if (!retryCameraBtn) return;
-  retryCameraBtn.style.display = mostrar ? 'inline-flex' : 'none';
-}
-
-function cargarScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = src;
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
-    document.head.appendChild(script);
-  });
-}
-
-async function asegurarLibreriaQr() {
-  if (window.Html5Qrcode) return;
-
-  let ultimoError;
-  for (const url of QR_LIB_URLS) {
-    try {
-      await cargarScript(url);
-      if (window.Html5Qrcode) return;
-    } catch (err) {
-      ultimoError = err;
-    }
+    throw new Error('La cámara abrió, pero no hay motor de escaneo QR disponible.');
   }
 
-  throw ultimoError || new Error('No se pudo cargar la librería de escaneo QR.');
-}
-
-function validarEntornoCamara() {
-  if (!window.isSecureContext) {
-    throw new Error('La cámara solo funciona en HTTPS o localhost.');
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Este navegador no soporta acceso a cámara.');
-  }
+  scanNativoActivo = true;
+  requestAnimationFrame(escanearConDetectorNativo);
 }
 
 async function iniciarScanner() {
@@ -528,13 +443,11 @@ async function iniciarScanner() {
     mostrarBotonReintento(false);
     validarEntornoCamara();
     detenerScannerNativo();
-
-    if (html5QrCodeInstance?.isScanning) {
-      await html5QrCodeInstance.stop();
-    }
+    if (readerEl) readerEl.innerHTML = '';
 
     try {
       await asegurarLibreriaQr();
+      await detenerScannerHtml5();
 
       html5QrCodeInstance = new Html5Qrcode('reader');
       const cams = await Html5Qrcode.getCameras();
@@ -549,28 +462,67 @@ async function iniciarScanner() {
 
       if (!esIOS) {
         configEscaneo.qrbox = { width: 240, height: 240 };
-      } else {
+      } else if (statusEl) {
         statusEl.textContent = 'Modo iPhone/iPad activado: acerca el QR y manténlo estable 1-2 segundos.';
       }
 
       await iniciarConFallback(html5QrCodeInstance, cams, configEscaneo);
       await intentarConfigurarAutoenfoque();
 
-      scanState.textContent = 'Escáner activo';
-      if (!esIOS) {
-        statusEl.textContent = 'Escáner activo. Esperando primer QR…';
-      }
-    } catch (errorLibreria) {
-      html5QrCodeInstance = null;
+      if (scanState) scanState.textContent = 'Escáner activo';
+      if (!esIOS && statusEl) statusEl.textContent = 'Escáner activo. Esperando primer QR…';
+    } catch (_) {
       await iniciarScannerNativo();
-      scanState.textContent = 'Escáner activo';
+      if (scanState) scanState.textContent = 'Escáner activo';
     }
   } catch (err) {
-    scanState.textContent = 'Error de cámara';
-    statusEl.textContent = `No se pudo abrir la cámara: ${err.message || err}`;
+    if (scanState) scanState.textContent = 'Error de cámara';
+    if (statusEl) statusEl.textContent = `No se pudo abrir la cámara: ${err?.message || err}`;
     mostrarBotonReintento(true);
   }
 }
 
+$('cancelBtn')?.addEventListener('click', cerrarModal);
+$('manualBtn')?.addEventListener('click', () => abrirModal('', true));
+$('copyBtn')?.addEventListener('click', copiarTablaInventario);
+$('mailBtn')?.addEventListener('click', async () => {
+  const copiado = await copiarTablaInventario();
+  if (!registros.length) return;
+
+  const asunto = encodeURIComponent(`Inventario QR (${registros.length} registros)`);
+  const cuerpo = copiado
+    ? encodeURIComponent('La tabla de inventario ya está copiada en tu portapapeles.\nPégala en el cuerpo del correo (Paste/Pegar).')
+    : encodeURIComponent('No se pudo copiar formato enriquecido automáticamente.\nPuedes copiar manualmente la tabla visible en la app.');
+
+  window.location.href = `mailto:?subject=${asunto}&body=${cuerpo}`;
+});
+
+$('guardarBtn')?.addEventListener('click', async () => {
+  const codigo = (modoManual ? $('codigoInput').value : codigoPendiente || $('codigoInput').value).trim();
+  const cantidad = Number($('cantidadInput').value);
+  const serie = $('serieInput').value.trim();
+
+  if (!codigo) {
+    alert('Introduce un código de componente válido.');
+    return;
+  }
+  if (!cantidad || cantidad <= 0) {
+    alert('Introduce una cantidad válida mayor que 0.');
+    return;
+  }
+  if (!serie) {
+    alert('Introduce el número de serie destino.');
+    return;
+  }
+
+  registros.push({ codigo, cantidad, serie, fecha: fmtDate(new Date()) });
+  actualizarTabla();
+  await cerrarModal();
+});
+
 retryCameraBtn?.addEventListener('click', iniciarScanner);
+window.addEventListener('beforeunload', () => {
+  detenerScannerNativo();
+  detenerScannerHtml5();
+});
 window.addEventListener('load', iniciarScanner);
